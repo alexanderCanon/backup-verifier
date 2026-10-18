@@ -53,14 +53,14 @@ def test_s3_failures_are_stored(aws, code, expected):
     assert table.put_item.call_args.kwargs["Item"]["status"] == expected
 
 
-def test_missing_config_does_not_call_s3_or_store(aws):
+def test_missing_config_is_recorded_without_s3_request(aws):
     table, s3 = aws
     table.get_item.return_value = {}
     assert lambda_handler({"backupId": "unknown"}, None) == {
         "status": "ERROR", "reason": "BACKUP_CONFIG_NOT_FOUND"
     }
     s3.head_object.assert_not_called()
-    table.put_item.assert_not_called()
+    assert table.put_item.call_args.kwargs["Item"]["reason"] == "BACKUP_CONFIG_NOT_FOUND"
 
 
 def test_invalid_event(aws):
@@ -75,6 +75,7 @@ def test_invalid_stored_configuration(aws):
     table.get_item.return_value = {"Item": {"bucket": "test-backups"}}
     assert lambda_handler({"backupId": "postgres"}, None)["reason"] == "INVALID_BACKUP_CONFIG"
     s3.head_object.assert_not_called()
+    assert table.put_item.call_args.kwargs["Item"]["reason"] == "INVALID_BACKUP_CONFIG"
 
 
 def test_failed_persistence_is_not_silenced(aws):
