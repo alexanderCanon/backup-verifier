@@ -44,10 +44,9 @@ Requirements: Python 3.13, AWS SAM CLI, and pytest.
 python -m pytest
 sam validate
 sam build
-sam local invoke BackupVerifierFunction --event events/example.json
+echo '{}' > event.json
+sam local invoke BackupVerifierFunction --event event.json
 ```
-
-The local invocation step requires creating an event file first; for a quick invocation use `echo '{}' > event.json` followed by `sam local invoke BackupVerifierFunction --event event.json`.
 
 **Do not deploy expecting backup verification yet.** Deployment creates a Lambda scaffold only.
 
