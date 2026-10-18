@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "backup-verifier-test"
+resolve_s3 = true
+s3_prefix = "backup-verifier-test"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "BackupBucketName=\"backup-verifier-test-45d9048b\" BackupId=\"postgres\" VerificationSchedule=\"rate(1 day)\" SchedulerState=\"DISABLED\""
+image_repositories = []
+
+[default.global.parameters]
+region = "us-east-1"
