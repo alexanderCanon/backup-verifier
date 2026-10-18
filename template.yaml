@@ -10,14 +10,27 @@ Globals:
     Timeout: 15
     MemorySize: 128
 
+Parameters:
+  BackupBucketName:
+    Type: String
+    Description: Existing S3 bucket that the verifier is allowed to inspect
+
 Resources:
   BackupVerifierFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
       Handler: handler.lambda_handler
-      Description: Initial Lambda scaffold for backup health checks
-      # No trigger or AWS data permissions yet: added in later implementation steps.
+      Description: Validate existence, size, and age of S3 backup objects
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub 'arn:${AWS::Partition}:s3:::${BackupBucketName}/*'
+            - Effect: Allow
+              Action: s3:ListBucket
+              Resource: !Sub 'arn:${AWS::Partition}:s3:::${BackupBucketName}'
 
 Outputs:
   BackupVerifierFunctionArn:
