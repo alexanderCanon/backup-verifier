@@ -1,0 +1,6 @@
+{
+  "bucket": "replace-with-your-bucket",
+  "key": "database/latest.sql.gz",
+  "minSizeBytes": 1048576,
+  "maxAgeHours": 24
+}
