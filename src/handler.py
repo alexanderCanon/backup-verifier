@@ -53,8 +53,9 @@ def lambda_handler(event, context):
 
     # Record first: do not notify about a check that failed to persist.
     saved = save_result(table, backup_id, result)
-    publish_failure(
-        boto3.client("sns"), os.environ["ALERT_TOPIC_ARN"],
-        backup_id, result, saved["checkedAt"],
-    )
+    if result["status"] != Status.HEALTHY:
+        publish_failure(
+            boto3.client("sns"), os.environ["ALERT_TOPIC_ARN"],
+            backup_id, result, saved["checkedAt"],
+        )
     return result
