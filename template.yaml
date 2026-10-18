@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: AWS Backup Verifier - initial SAM application scaffold
+Description: AWS Backup Verifier - serverless backup health checks
 
 Globals:
   Function:
@@ -14,6 +14,22 @@ Parameters:
   BackupBucketName:
     Type: String
     Description: Existing S3 bucket that the verifier is allowed to inspect
+  BackupId:
+    Type: String
+    Default: postgres
+    AllowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$'
+    Description: Identifier of the backup configuration stored in DynamoDB
+  VerificationSchedule:
+    Type: String
+    Default: 'rate(1 day)'
+    Description: EventBridge Scheduler expression
+  SchedulerState:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+    Description: Enable after creating the backup configuration in DynamoDB
 
 Resources:
   BackupTable:
@@ -40,6 +56,16 @@ Resources:
         Variables:
           BACKUP_TABLE_NAME: !Ref BackupTable
       Description: Validate existence, size, and age of S3 backup objects
+      Events:
+        PeriodicVerification:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: !Ref VerificationSchedule
+            ScheduleExpressionTimezone: UTC
+            State: !Ref SchedulerState
+            FlexibleTimeWindow:
+              Mode: 'OFF'
+            Input: !Sub '{"backupId":"${BackupId}"}'
       Policies:
         - Version: '2012-10-17'
           Statement:
