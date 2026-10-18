@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 
@@ -42,3 +43,30 @@ def test_invalid_config(event):
 def test_naive_s3_timestamp_is_rejected():
     with pytest.raises(ValueError):
         evaluate({"ContentLength": 100, "LastModified": datetime(2026, 10, 18)}, CONFIG, NOW)
+
+
+def test_dynamodb_decimal_configuration_is_accepted():
+    config = Config.from_event({
+        "bucket": "backups",
+        "key": "db.gz",
+        "minSizeBytes": Decimal("1048576"),
+        "maxAgeHours": Decimal("24"),
+    })
+    assert config.min_size_bytes == 1048576
+    assert config.max_age_hours == 24.0
+    metadata = {
+        "ContentLength": 2097152,
+        "LastModified": NOW - timedelta(hours=1),
+    }
+    assert evaluate(metadata, config, NOW)["status"] == "HEALTHY"
+
+
+@pytest.mark.parametrize("bad_size", [Decimal("1.5"), Decimal("NaN"), Decimal("-1")])
+def test_invalid_dynamodb_decimal_size_is_rejected(bad_size):
+    with pytest.raises(ValueError):
+        Config.from_event({
+            "bucket": "backups",
+            "key": "db.gz",
+            "minSizeBytes": bad_size,
+            "maxAgeHours": Decimal("24"),
+        })
