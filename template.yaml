@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: AWS Backup Verifier - initial SAM application scaffold
+Description: AWS Backup Verifier - serverless backup health checks
 
 Globals:
   Function:
@@ -14,11 +14,25 @@ Parameters:
   BackupBucketName:
     Type: String
     Description: Existing S3 bucket that the verifier is allowed to inspect
-
   BackupId:
     Type: String
     Default: postgres
-    AllowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*  BackupTable:
+    AllowedPattern: '^[a-zA-Z0-9][a-zA-Z0-9_-]*$'
+    Description: Identifier of the backup configuration stored in DynamoDB
+  VerificationSchedule:
+    Type: String
+    Default: 'rate(1 day)'
+    Description: EventBridge Scheduler expression
+  SchedulerState:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+    Description: Enable after creating the backup configuration in DynamoDB
+
+Resources:
+  BackupTable:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
@@ -46,76 +60,12 @@ Parameters:
         PeriodicVerification:
           Type: ScheduleV2
           Properties:
-            OmitName: true
             ScheduleExpression: !Ref VerificationSchedule
             ScheduleExpressionTimezone: UTC
             State: !Ref SchedulerState
             FlexibleTimeWindow:
               Mode: 'OFF'
             Input: !Sub '{"backupId":"${BackupId}"}'
-      Policies:
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:GetItem
-                - dynamodb:PutItem
-              Resource: !GetAtt BackupTable.Arn
-        - Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Action: s3:GetObject
-              Resource: !Sub 'arn:${AWS::Partition}:s3:::${BackupBucketName}/*'
-            - Effect: Allow
-              Action: s3:ListBucket
-              Resource: !Sub 'arn:${AWS::Partition}:s3:::${BackupBucketName}'
-
-Outputs:
-  BackupVerifierFunctionArn:
-    Description: ARN of the verifier Lambda function
-    Value: !GetAtt BackupVerifierFunction.Arn
-  BackupTableName:
-    Description: DynamoDB table for backup configuration and verification history
-    Value: !Ref BackupTable
-
-    Description: Identifier of the backup configuration stored in DynamoDB
-  VerificationSchedule:
-    Type: String
-    Default: 'rate(1 day)'
-    Description: EventBridge Scheduler expression, e.g. rate(1 day)
-  SchedulerState:
-    Type: String
-    Default: DISABLED
-    AllowedValues:
-      - ENABLED
-      - DISABLED
-    Description: Enable only after the DynamoDB backup configuration has been created
-
-Resources:
-  BackupTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: PK
-          AttributeType: S
-        - AttributeName: SK
-          AttributeType: S
-      KeySchema:
-        - AttributeName: PK
-          KeyType: HASH
-        - AttributeName: SK
-          KeyType: RANGE
-
-  BackupVerifierFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: src/
-      Handler: handler.lambda_handler
-      Environment:
-        Variables:
-          BACKUP_TABLE_NAME: !Ref BackupTable
-      Description: Validate existence, size, and age of S3 backup objects
       Policies:
         - Version: '2012-10-17'
           Statement:
