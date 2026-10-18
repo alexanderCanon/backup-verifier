@@ -85,3 +85,44 @@ def test_failed_persistence_is_not_silenced(aws):
     )
     with pytest.raises(ClientError):
         lambda_handler({"backupId": "postgres"}, None)
+
+
+def test_healthy_sends_no_notification(aws, monkeypatch):
+    table, s3 = aws
+    sns = Mock()
+    original_client = boto3.client
+    monkeypatch.setenv("ALERT_TOPIC_ARN", "arn:aws:sns:us-east-1:123456789012:alerts")
+    monkeypatch.setattr(boto3, "client", lambda service: sns if service == "sns" else original_client(service))
+    assert lambda_handler({"backupId": "postgres"}, None)["status"] == "HEALTHY"
+    sns.publish.assert_not_called()
+
+
+def test_missing_sends_alert_after_record(aws, monkeypatch):
+    table, s3 = aws
+    sns = Mock()
+    s3.head_object.side_effect = ClientError(
+        {"Error": {"Code": "404"}, "ResponseMetadata": {"HTTPStatusCode": 404}},
+        "HeadObject",
+    )
+    monkeypatch.setenv("ALERT_TOPIC_ARN", "arn:aws:sns:us-east-1:123456789012:alerts")
+    monkeypatch.setattr(boto3, "client", lambda service: sns if service == "sns" else s3)
+    assert lambda_handler({"backupId": "postgres"}, None)["status"] == "MISSING"
+    table.put_item.assert_called_once()
+    sns.publish.assert_called_once()
+    import json
+    message = json.loads(sns.publish.call_args.kwargs["Message"])
+    assert message["status"] == "MISSING"
+    assert message["checkedAt"] == table.put_item.call_args.kwargs["Item"]["checkedAt"]
+
+
+def test_config_read_failure_sends_error_alert(aws, monkeypatch):
+    table, s3 = aws
+    table.get_item.side_effect = ClientError(
+        {"Error": {"Code": "InternalServerError"}}, "GetItem"
+    )
+    sns = Mock()
+    monkeypatch.setenv("ALERT_TOPIC_ARN", "arn:aws:sns:us-east-1:123456789012:alerts")
+    monkeypatch.setattr(boto3, "client", lambda service: sns if service == "sns" else s3)
+    assert lambda_handler({"backupId": "postgres"}, None)["reason"] == "CONFIG_READ_FAILED"
+    table.put_item.assert_not_called()
+    sns.publish.assert_called_once()
