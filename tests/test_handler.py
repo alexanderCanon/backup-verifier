@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from unittest.mock import Mock
 
 import boto3
@@ -127,3 +128,16 @@ def test_config_read_failure_sends_error_alert(aws, monkeypatch):
     assert lambda_handler({"backupId": "postgres"}, None)["reason"] == "CONFIG_READ_FAILED"
     table.put_item.assert_not_called()
     sns.publish.assert_called_once()
+
+
+def test_dynamodb_decimal_values_are_accepted(aws):
+    table, s3 = aws
+    table.get_item.return_value = {"Item": {
+        "bucket": "test-backups",
+        "key": "db/latest.gz",
+        "minSizeBytes": Decimal("100"),
+        "maxAgeHours": Decimal("24"),
+    }}
+    result = lambda_handler({"backupId": "postgres"}, None)
+    assert result == {"status": "HEALTHY", "reason": "ALL_CHECKS_PASSED"}
+    s3.head_object.assert_called_once()
