@@ -38,7 +38,7 @@ Note: a real S3 request **requires valid AWS credentials**, network access, and 
 sam deploy --guided --parameter-overrides BackupBucketName=your-existing-bucket BackupId=postgres VerificationSchedule='rate(1 day)' SchedulerState=DISABLED
 ```
 
-The SAM template declares a Lambda function, a pay-per-request DynamoDB table, and IAM permissions for S3 and DynamoDB. The S3 bucket must already exist; the bucket configured in DynamoDB must match the deployment parameter `BackupBucketName`. Deployment adds an EventBridge Scheduler schedule (disabled by default), but not SNS yet. Deploying may incur AWS costs.
+The SAM template declares a Lambda function, a pay-per-request DynamoDB table, and IAM permissions for S3 and DynamoDB. The S3 bucket must already exist; the bucket configured in DynamoDB must match the deployment parameter `BackupBucketName`. Deployment adds an EventBridge Scheduler schedule (disabled by default) and an SNS topic for failure alerts. Deploying may incur AWS costs.
 
 ### Configuration
 
@@ -89,7 +89,21 @@ Example initial deployment:
 sam deploy --guided --parameter-overrides BackupBucketName=my-backups BackupId=postgres VerificationSchedule='rate(1 day)' SchedulerState=DISABLED
 ```
 
-After creating the CONFIG item, use the same deployment parameters with `SchedulerState=ENABLED`. Confirm parameter values when using `sam deploy --guided`; review its change set before approving. The schedule is in UTC with flexible windows disabled, but the execution is not a hard real-time guarantee. Each configured stack schedule checks one backup ID. The Scheduler only triggers Lambda: a successful invocation **does not imply** that the backup is healthy. SNS alerts are planned for issue #6.
+After creating the CONFIG item, use the same deployment parameters with `SchedulerState=ENABLED`. Confirm parameter values when using `sam deploy --guided`; review its change set before approving. The schedule is in UTC with flexible windows disabled, but the execution is not a hard real-time guarantee. Each configured stack schedule checks one backup ID. The Scheduler only triggers Lambda: a successful invocation **does not imply** that the backup is healthy. SNS sends an alert for each failed check (issue #6).
+
+### Failure notifications (issue #6)
+
+The stack provisions one Amazon SNS topic, returned as `BackupAlertTopicArn` in CloudFormation stack outputs. Add an email subscription through the SNS console, or using AWS CLI:
+
+```bash
+aws sns subscribe --topic-arn YOUR_TOPIC_ARN --protocol email --notification-endpoint you@example.com
+```
+
+**Confirm the subscription** using the verification link sent to that mailbox, or email alerts will not be delivered. No email address is hard-coded in the template.
+
+Every check returning `MISSING`, `UNHEALTHY` or `ERROR` publishes an alert with `backupId`, `status`, `reason`, and `checkedAt` in UTC. `HEALTHY` produces no alert. Repeated failures produce repeated messages; there is no state-transition logic or deduplication.
+
+For a valid backup ID, a DynamoDB configuration read failure also publishes an `ERROR` alert, but cannot record the result if DynamoDB is unavailable. Missing/invalid configuration can be recorded and alerted. Malformed events with no valid backup ID return `ERROR` without SNS because an identifier is unavailable. If DynamoDB result persistence or SNS publishing fails, the Lambda invocation fails; retries could generate repeated notifications. Monitoring delivery failures is part of integration testing (#7).
 
 ## Example Lambda event
 
@@ -103,8 +117,8 @@ After creating the CONFIG item, use the same deployment parameters with `Schedul
 
 - #3 S3 metadata validations
 - #4 DynamoDB configuration and verification history
-- #5 EventBridge schedule (this change)
-- #6 SNS alerts
+- #5 EventBridge schedule
+- #6 SNS alerts (this change)
 - #7 End-to-end deployment verification and documentation
 
 ## License
