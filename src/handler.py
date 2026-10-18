@@ -1,10 +1,12 @@
 """Lambda entry point: load configuration, verify S3, store result."""
 
 import os
+from datetime import datetime, timezone
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 
+from notifications import publish_failure
 from storage import BackupNotFound, get_backup_config, save_result
 from verifier import Status, evaluate
 
@@ -36,17 +38,23 @@ def lambda_handler(event, context):
         config = get_backup_config(table, backup_id)
     except BackupNotFound:
         result = {"status": Status.ERROR, "reason": "BACKUP_CONFIG_NOT_FOUND"}
-        save_result(table, backup_id, result)
-        return result
     except ValueError:
         result = {"status": Status.ERROR, "reason": "INVALID_BACKUP_CONFIG"}
-        save_result(table, backup_id, result)
-        return result
     except (ClientError, BotoCoreError):
-        return {"status": Status.ERROR, "reason": "CONFIG_READ_FAILED"}
+        # DynamoDB may be unavailable: alert without claiming the check was recorded.
+        result = {"status": Status.ERROR, "reason": "CONFIG_READ_FAILED"}
+        publish_failure(
+            boto3.client("sns"), os.environ["ALERT_TOPIC_ARN"],
+            backup_id, result, datetime.now(timezone.utc).isoformat(),
+        )
+        return result
+    else:
+        result = check_s3(boto3.client("s3"), config)
 
-    result = check_s3(boto3.client("s3"), config)
-    # Persistence failures must surface to Lambda; never report a successful
-    # check that was not recorded.
-    save_result(table, backup_id, result)
+    # Record first: do not notify about a check that failed to persist.
+    saved = save_result(table, backup_id, result)
+    publish_failure(
+        boto3.client("sns"), os.environ["ALERT_TOPIC_ARN"],
+        backup_id, result, saved["checkedAt"],
+    )
     return result
