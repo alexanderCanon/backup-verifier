@@ -32,6 +32,9 @@ Parameters:
     Description: Enable after creating the backup configuration in DynamoDB
 
 Resources:
+  BackupAlertTopic:
+    Type: AWS::SNS::Topic
+
   BackupTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -55,6 +58,7 @@ Resources:
       Environment:
         Variables:
           BACKUP_TABLE_NAME: !Ref BackupTable
+          ALERT_TOPIC_ARN: !Ref BackupAlertTopic
       Description: Validate existence, size, and age of S3 backup objects
       Events:
         PeriodicVerification:
@@ -67,6 +71,11 @@ Resources:
               Mode: 'OFF'
             Input: !Sub '{"backupId":"${BackupId}"}'
       Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref BackupAlertTopic
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -90,3 +99,6 @@ Outputs:
   BackupTableName:
     Description: DynamoDB table for backup configuration and verification history
     Value: !Ref BackupTable
+  BackupAlertTopicArn:
+    Description: SNS topic ARN to subscribe for backup failure alerts
+    Value: !Ref BackupAlertTopic
