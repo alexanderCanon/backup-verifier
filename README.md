@@ -68,7 +68,7 @@ aws dynamodb put-item --table-name YOUR_STACK_TABLE_NAME --item '{
 }'
 ```
 
-This is an example: replace the bucket, key, and table values with your own. The Lambda looks up `PK=BACKUP#<backupId>`, `SK=CONFIG`, then writes each completed verification as `SK=RUN#<UTC timestamp>#<UUID>` under the same PK. A missing/invalid configuration returns `ERROR` without making an S3 request. A failed DynamoDB write causes the invocation to fail rather than misreporting a successfully recorded check.
+This is an example: replace the bucket, key, and table values with your own. The Lambda looks up `PK=BACKUP#<backupId>`, `SK=CONFIG`, then writes each completed verification as `SK=RUN#<UTC timestamp>#<UUID>` under the same PK. A missing/invalid configuration returns `ERROR`, records the result, and skips the S3 request. A failed DynamoDB write causes the invocation to fail rather than misreporting a successfully recorded check.
 
 For the initial MVP, configuration is entered manually; no management API is needed.
 
