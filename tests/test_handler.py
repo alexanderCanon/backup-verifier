@@ -23,6 +23,7 @@ def aws(monkeypatch):
     resource = Mock()
     resource.Table.return_value = table
     monkeypatch.setenv("BACKUP_TABLE_NAME", "test-table")
+    monkeypatch.setenv("ALERT_TOPIC_ARN", "arn:aws:sns:us-east-1:123456789012:alerts")
     monkeypatch.setattr(boto3, "resource", lambda name: resource)
     monkeypatch.setattr(boto3, "client", lambda name: client)
     return table, client
