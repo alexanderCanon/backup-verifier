@@ -4,7 +4,7 @@ Serverless monitoring of S3 backup objects using AWS Lambda and AWS SAM / CloudF
 
 ## V1 health checks
 
-Given a bucket, object key, minimum size (bytes) and maximum age (hours), the Lambda uses S3 `HeadObject` without downloading the backup. It reports:
+Given a backup ID, Lambda reads its bucket, object key, minimum size (bytes) and maximum age (hours) from DynamoDB, then uses S3 `HeadObject` without downloading the backup. It reports:
 
 - `HEALTHY`: size and age thresholds pass.
 - `MISSING`: S3 returns HTTP 404.
@@ -24,7 +24,7 @@ sam validate
 sam build
 ```
 
-To run against a real S3 object, edit `events/example.json` and invoke:
+To run against a real S3 object, first deploy and insert a configuration item in DynamoDB. Then edit `events/example.json` with its `backupId` and invoke:
 
 ```bash
 sam local invoke BackupVerifierFunction --event events/example.json
@@ -38,12 +38,16 @@ Note: a real S3 request **requires valid AWS credentials**, network access, and 
 sam deploy --guided --parameter-overrides BackupBucketName=your-existing-bucket
 ```
 
-The SAM template declares a Lambda function and S3 read/list access scoped to the given **existing** bucket. It does not create the backup bucket. The invocation event must use that same bucket. Deployment does not yet add a schedule, DynamoDB or SNS; those are tracked in later issues. Deploying may incur AWS costs.
+The SAM template declares a Lambda function, a pay-per-request DynamoDB table, and IAM permissions for S3 and DynamoDB. The S3 bucket must already exist; the bucket configured in DynamoDB must match the deployment parameter `BackupBucketName`. Deployment does not add a schedule or SNS yet. Deploying may incur AWS costs.
 
-## Example Lambda event
+### Configuration
+
+After deployment, find the table name in stack outputs. Insert one configuration item (manually in DynamoDB console, or using AWS CLI) with these attributes:
 
 ```json
 {
+  "PK": "BACKUP#postgres",
+  "SK": "CONFIG",
   "bucket": "my-backups",
   "key": "database/latest.sql.gz",
   "minSizeBytes": 1048576,
@@ -51,10 +55,35 @@ The SAM template declares a Lambda function and S3 read/list access scoped to th
 }
 ```
 
+Use string types for `PK`, `SK`, `bucket`, `key`; use DynamoDB Number for `minSizeBytes` and `maxAgeHours`. For example, with AWS CLI:
+
+```bash
+aws dynamodb put-item --table-name YOUR_STACK_TABLE_NAME --item '{
+  "PK": {"S": "BACKUP#postgres"},
+  "SK": {"S": "CONFIG"},
+  "bucket": {"S": "my-backups"},
+  "key": {"S": "database/latest.sql.gz"},
+  "minSizeBytes": {"N": "1048576"},
+  "maxAgeHours": {"N": "24"}
+}'
+```
+
+This is an example: replace the bucket, key, and table values with your own. The Lambda looks up `PK=BACKUP#<backupId>`, `SK=CONFIG`, then writes each completed verification as `SK=RUN#<UTC timestamp>#<UUID>` under the same PK. A missing/invalid configuration returns `ERROR`, records the result, and skips the S3 request. A failed DynamoDB write causes the invocation to fail rather than misreporting a successfully recorded check.
+
+For the initial MVP, configuration is entered manually; no management API is needed.
+
+## Example Lambda event
+
+```json
+{
+  "backupId": "postgres"
+}
+```
+
 ## Roadmap
 
-- #3 S3 metadata validations (this change)
-- #4 DynamoDB configuration and verification history
+- #3 S3 metadata validations
+- #4 DynamoDB configuration and verification history (this change)
 - #5 EventBridge schedule
 - #6 SNS alerts
 - #7 End-to-end deployment verification and documentation
