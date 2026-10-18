@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AWS Backup Verifier - initial SAM application scaffold
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures:
+      - arm64
+    Timeout: 15
+    MemorySize: 128
+
+Resources:
+  BackupVerifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handler.lambda_handler
+      Description: Initial Lambda scaffold for backup health checks
+      # No trigger or AWS data permissions yet: added in later implementation steps.
+
+Outputs:
+  BackupVerifierFunctionArn:
+    Description: ARN of the verifier Lambda function
+    Value: !GetAtt BackupVerifierFunction.Arn
