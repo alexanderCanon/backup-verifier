@@ -35,10 +35,10 @@ Note: a real S3 request **requires valid AWS credentials**, network access, and 
 ## Deployment (not required for local tests)
 
 ```bash
-sam deploy --guided --parameter-overrides BackupBucketName=your-existing-bucket
+sam deploy --guided --parameter-overrides BackupBucketName=your-existing-bucket BackupId=postgres VerificationSchedule='rate(1 day)' SchedulerState=DISABLED
 ```
 
-The SAM template declares a Lambda function, a pay-per-request DynamoDB table, and IAM permissions for S3 and DynamoDB. The S3 bucket must already exist; the bucket configured in DynamoDB must match the deployment parameter `BackupBucketName`. Deployment does not add a schedule or SNS yet. Deploying may incur AWS costs.
+The SAM template declares a Lambda function, a pay-per-request DynamoDB table, and IAM permissions for S3 and DynamoDB. The S3 bucket must already exist; the bucket configured in DynamoDB must match the deployment parameter `BackupBucketName`. Deployment adds an EventBridge Scheduler schedule (disabled by default), but not SNS yet. Deploying may incur AWS costs.
 
 ### Configuration
 
@@ -72,6 +72,25 @@ This is an example: replace the bucket, key, and table values with your own. The
 
 For the initial MVP, configuration is entered manually; no management API is needed.
 
+### Scheduled verification (issue #5)
+
+AWS SAM's `ScheduleV2` creates an EventBridge Scheduler schedule and the necessary target invocation IAM role. Each scheduled invocation sends this exact JSON to the existing Lambda: `{"backupId":"postgres"}` (where `postgres` is the `BackupId` parameter). The Lambda handler remains manually invokable with the same event.
+
+Parameters:
+- `BackupId`: backup configuration ID, default `postgres`.
+- `VerificationSchedule`: EventBridge Scheduler expression, default `rate(1 day)`.
+- `SchedulerState`: `DISABLED` (default) or `ENABLED`.
+
+**Why disabled by default?** A schedule should not start checking a missing configuration as soon as a new stack is deployed. First insert the DynamoDB `CONFIG` item shown above; then update the stack with `SchedulerState=ENABLED` (preserving the same bucket and other parameters). Future schedule changes require only updating `VerificationSchedule` and redeploying, not changing Python.
+
+Example initial deployment:
+
+```bash
+sam deploy --guided --parameter-overrides BackupBucketName=my-backups BackupId=postgres VerificationSchedule='rate(1 day)' SchedulerState=DISABLED
+```
+
+After creating the CONFIG item, use the same deployment parameters with `SchedulerState=ENABLED`. Confirm parameter values when using `sam deploy --guided`; review its change set before approving. The schedule is in UTC with flexible windows disabled, but the execution is not a hard real-time guarantee. Each configured stack schedule checks one backup ID. The Scheduler only triggers Lambda: a successful invocation **does not imply** that the backup is healthy. SNS alerts are planned for issue #6.
+
 ## Example Lambda event
 
 ```json
@@ -83,8 +102,8 @@ For the initial MVP, configuration is entered manually; no management API is nee
 ## Roadmap
 
 - #3 S3 metadata validations
-- #4 DynamoDB configuration and verification history (this change)
-- #5 EventBridge schedule
+- #4 DynamoDB configuration and verification history
+- #5 EventBridge schedule (this change)
 - #6 SNS alerts
 - #7 End-to-end deployment verification and documentation
 
