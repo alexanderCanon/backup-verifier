@@ -15,7 +15,7 @@ These metadata checks **do not prove a backup can be restored**.
 
 ## Development
 
-Python 3.13, AWS SAM CLI, Docker (for `sam local invoke`).
+Python 3.13 and AWS SAM CLI. Docker is needed for `sam local invoke` and for `sam build --use-container`, but not for unit tests or builds using a matching local Python runtime. GitHub Actions runs tests, `sam validate --lint` and `sam build` on Python 3.13.
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -113,12 +113,79 @@ For a valid backup ID, a DynamoDB configuration read failure also publishes an `
 }
 ```
 
+### Verify an AWS deployment
+
+Set the AWS region explicitly (the examples use `us-east-1`); replace placeholders with your stack's real outputs:
+
+```bash
+aws cloudformation describe-stacks --stack-name YOUR_STACK_NAME --region us-east-1 \
+  --query 'Stacks[0].Outputs'
+```
+
+Create the DynamoDB `CONFIG` item as shown above and ensure the S3 key exists. Invoke the Lambda and read the payload file:
+
+```bash
+aws lambda invoke --region us-east-1 \
+  --function-name YOUR_FUNCTION_NAME \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"backupId":"postgres"}' response.json
+cat response.json
+```
+
+Expected healthy payload: `{"status":"HEALTHY","reason":"ALL_CHECKS_PASSED"}`, provided the object meets both thresholds. The CLI invocation's success is **not** equivalent to a successful verification; inspect the returned payload and any `FunctionError`.
+
+Confirm that a run was persisted:
+
+```bash
+aws dynamodb query --region us-east-1 --table-name YOUR_STACK_TABLE_NAME \
+  --key-condition-expression 'PK = :pk AND begins_with(SK, :run)' \
+  --expression-attribute-values '{":pk":{"S":"BACKUP#postgres"},":run":{"S":"RUN#"}}'
+```
+
+To exercise SNS delivery without deleting the S3 object, temporarily increase `minSizeBytes` above its actual size, invoke again, and confirm an `UNHEALTHY` / `SIZE_BELOW_MINIMUM` response, a persisted run, and an SNS email. **Restore the original threshold afterward.** The SNS email subscription must have been confirmed beforehand.
+
+To inspect (but not activate) the schedule:
+
+```bash
+aws scheduler get-schedule --region us-east-1 \
+  --name BackupVerifierFunctionPeriodicVerification \
+  --query '{State:State,Expression:ScheduleExpression,Target:Target.Arn}'
+```
+
+`list-schedules` does not return `ScheduleExpression`; use `get-schedule` for that field. A configured `DISABLED` schedule is not an end-to-end test of scheduled delivery.
+
+### Observed deployed test (2026-10-18)
+
+In a test stack in `us-east-1`, a synthetic 2 MiB object at `database/latest.sql.gz` was checked against an initial 1 MiB minimum and 24-hour maximum age. The first invocation recorded `ERROR / INVALID_BACKUP_CONFIG`: boto3's DynamoDB resource returns Number attributes as `Decimal`. PR #12 corrected the validation. A later invocation returned `HEALTHY / ALL_CHECKS_PASSED`, and both runs were confirmed in DynamoDB. Raising the minimum to 10 MiB produced `UNHEALTHY / SIZE_BELOW_MINIMUM`, with a confirmed SNS email delivery; the user restored the original minimum afterward.
+
+CloudFormation reported `CREATE_COMPLETE` for the stack. EventBridge Scheduler was inspected and showed `DISABLED` with `rate(1 day)`; **automatic scheduled invocation has not been tested**. Missing-object, expired-object, and AWS access-denied cases have not yet been confirmed against deployed AWS resources. Unit tests cover application behavior but do not establish production integration for those cases.
+
+### Cost, security, and cleanup
+
+AWS Lambda, DynamoDB (on-demand), S3, EventBridge Scheduler, SNS, CloudFormation and SAM's managed deployment bucket have separate billing/quota considerations. The exact bill varies by region, requests, stored bytes and current AWS pricing. This project is not guaranteed to be free; avoid enabling unnecessary recurring checks. IAM restricts the Lambda's S3 access to the bucket configured at deployment. SNS alerts contain backup metadata, not backup contents. The checker uses S3 metadata only: **it cannot prove that the backup is intact or restorable**.
+
+The configured backup S3 bucket is **external to this CloudFormation stack**. Deleting the stack does not delete backup objects or that bucket. Before cleanup, confirm the stack name and region. For a SAM-managed test stack:
+
+```bash
+sam delete --stack-name YOUR_STACK_NAME --region us-east-1
+```
+
+Review confirmation prompts and any deletion errors. This removes managed Lambda, DynamoDB (including its records), SNS topic and schedule; the SAM-managed artifact bucket may be shared with other deployments, so do **not** delete it indiscriminately. Remove only test objects/buckets that you explicitly own and no longer need. An SNS email subscription may need separate review if its topic has been removed. The DynamoDB history is not retained by this template on stack deletion.
+
+### Troubleshooting
+
+- `ResourceNotFoundException` querying DynamoDB: verify AWS account, `--region` and the table name from CloudFormation outputs.
+- `INVALID_BACKUP_CONFIG`: check the required fields and DynamoDB Number types; use a version with the DynamoDB `Decimal` fix (PR #12).
+- A healthy-looking `aws lambda invoke` CLI response does not prove `HEALTHY`; check `response.json`.
+- No SNS email: confirm the subscription, then check the Lambda outcome and CloudWatch logs.
+- Local `sam build` fails due to Python version mismatch: use Python 3.13 locally, a compatible container build, or the existing Python 3.13 GitHub Actions build. Container images can use several GB of disk; Docker is not required for plain tests.
+
 ## Roadmap
 
 - #3 S3 metadata validations
 - #4 DynamoDB configuration and verification history
 - #5 EventBridge schedule
-- #6 SNS alerts (this change)
+- #6 SNS alerts
 - #7 End-to-end deployment verification and documentation
 
 ## License
