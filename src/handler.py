@@ -35,9 +35,13 @@ def lambda_handler(event, context):
     try:
         config = get_backup_config(table, backup_id)
     except BackupNotFound:
-        return {"status": Status.ERROR, "reason": "BACKUP_CONFIG_NOT_FOUND"}
+        result = {"status": Status.ERROR, "reason": "BACKUP_CONFIG_NOT_FOUND"}
+        save_result(table, backup_id, result)
+        return result
     except ValueError:
-        return {"status": Status.ERROR, "reason": "INVALID_BACKUP_CONFIG"}
+        result = {"status": Status.ERROR, "reason": "INVALID_BACKUP_CONFIG"}
+        save_result(table, backup_id, result)
+        return result
     except (ClientError, BotoCoreError):
         return {"status": Status.ERROR, "reason": "CONFIG_READ_FAILED"}
 
