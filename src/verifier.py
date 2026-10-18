@@ -35,7 +35,10 @@ class Config:
             raise ValueError("bucket must be a nonempty string")
         if not isinstance(key, str) or not key.strip():
             raise ValueError("key must be a nonempty string")
-        if type(min_size) is not int or min_size < 0:
+        if (type(min_size) not in (int, Decimal)
+                or (type(min_size) is Decimal and not min_size.is_finite())
+                or min_size < 0
+                or min_size != int(min_size)):
             raise ValueError("minSizeBytes must be a nonnegative integer")
         if type(max_age) not in (int, float, Decimal) or not 0 < max_age < float("inf"):
             raise ValueError("maxAgeHours must be a positive finite number")
